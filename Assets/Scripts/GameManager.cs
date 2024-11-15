@@ -4,6 +4,10 @@ using TMPro;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.InputSystem;
+using System.Runtime.ConstrainedExecution;
+using System.IO;
+using System.Data.SqlTypes;
+using UnityEngine.UI;
 
 public class GameManager : MonoBehaviour
 {
@@ -33,12 +37,25 @@ public class GameManager : MonoBehaviour
     TextMeshProUGUI textPopup;
 
     [SerializeField]
+    GameObject panelHighScore;
+    [SerializeField]
+    TextMeshProUGUI textUsername;
+
+    [SerializeField]
     GameObject panelUpgrades;
+    [SerializeField]
+    GameObject panelScores;
+
+    [SerializeField]
+    GameObject panelAbout;
+    [SerializeField]
+    GameObject panelDebug;
 
     // resources
     int turn = 1;
 
     double money = 100;
+    double maxMoney = 100;
     double machines = 1;
     float threat = 0;
     float infectivity = 1;
@@ -58,6 +75,7 @@ public class GameManager : MonoBehaviour
 
     bool x10 = false;
     bool x100 = false;
+    bool escape = false;
 
     bool gameOver = false;
 
@@ -66,11 +84,26 @@ public class GameManager : MonoBehaviour
 
     Event[] activeEvents = new Event[0];
 
+    Scores scores = new Scores();
+    [SerializeField]
+    TextMeshProUGUI[] textScores;
+    private const string SCORE_FILE = "scores.json";
+    private const int SCORES_LENGTH = 10;
+
+    [SerializeField]
+    GameObject[] upgradeButtons = new GameObject[0];
+
     void Start()
     {
         this.CalculateRates();
 
         this.ConstructEvents();
+        this.LoadScores();
+    }
+
+    void Update()
+    {
+        this.UpdateText();
     }
 
     void ConstructEvents()
@@ -87,8 +120,13 @@ public class GameManager : MonoBehaviour
             }),
             new Event(1, () =>
             {
-                this.infectivity *= 10;
+                this.infectivityMultiplier *= 10;
                 this.Popup("A crazy zero day dropped! You can infect a lot of machines today before it gets patched!");
+            },
+            1,
+            () =>
+            {
+                this.infectivityMultiplier /= 10;
             }),
             new Event(1, () =>
             {
@@ -182,6 +220,40 @@ public class GameManager : MonoBehaviour
         }
     }
 
+    void LoadScores()
+    {
+        if (File.Exists(SCORE_FILE))
+        {
+            this.scores = JsonUtility.FromJson<Scores>(File.ReadAllText(SCORE_FILE));
+        }
+        else
+        {
+            this.scores = new Scores();
+        }
+        UpdateScores();
+    }
+
+    void SaveScores()
+    {
+        File.WriteAllText(SCORE_FILE, JsonUtility.ToJson(this.scores));
+    }
+
+    void UpdateScores()
+    {
+        for (int i = 0; i < SCORES_LENGTH; i++)
+        {
+            string name = this.scores.GetName(i);
+            if (name == null || name.Length == 0)
+            {
+                this.textScores[i].text = string.Format(CultureInfo.InvariantCulture, "#{0:d}", i + 1);
+            }
+            else
+            {
+                this.textScores[i].text = string.Format(CultureInfo.InvariantCulture, "#{0:d} {1} - ${2:f2}", i + 1, name, this.scores.GetValue(i));
+            }
+        }
+    }
+
     void TickEvents()
     {
         int activeCount = 0;
@@ -230,7 +302,7 @@ public class GameManager : MonoBehaviour
             return;
         }
 
-        Event e = weightedList[Mathf.FloorToInt(Mathf.Max(Mathf.Min(UnityEngine.Random.Range(0.0f, 1.0f) * weightedList.Length, 0.0f), weightedList.Length - 1))];
+        Event e = weightedList[Mathf.FloorToInt(Mathf.Min(Mathf.Max(UnityEngine.Random.Range(0.0f, 1.0f) * weightedList.Length, 0.0f), weightedList.Length - 1))];
 
         e.applyAction?.Invoke();
 
@@ -243,24 +315,28 @@ public class GameManager : MonoBehaviour
         this.activeEvents[oldEvents.Length] = e.Copy();
     }
 
-    void Update()
-    {
-        this.UpdateText();
-    }
-
     public void AdvanceTurn()
     {
+        if (this.gameOver)
+        {
+            return;
+        }
+
         this.turn++;
 
         this.money += this.changeMoney;
         this.machines += this.changeMachines;
 
+        if (this.money > this.maxMoney)
+        {
+            this.maxMoney = this.money;
+        }
+
         TickEvents();
 
         if (this.threat >= 1.0f)
         {
-            this.gameOver = true;
-            Popup("GAME OVER!\nYou got caught!");
+            GameOver("You got caught!");
             return;
         }
 
@@ -275,8 +351,7 @@ public class GameManager : MonoBehaviour
 
         if (this.money < 0)
         {
-            this.gameOver = true;
-            Popup("GAME OVER!\nYou ran out of money!");
+            GameOver("You ran out of money!");
             return;
         }
 
@@ -305,18 +380,89 @@ public class GameManager : MonoBehaviour
 
     void CalculateRates()
     {
-        this.infectivity = (float)30f / (float)(turn + 50f);
+        // as some events remove machines, make sure too many aren't assigned
+        if ((this.popDefense + this.popInfection + this.popMining) > (int)this.machines)
+        {
+            this.popDefense = Math.Max((int)this.machines - (this.popInfection + this.popMining), 0);
+            if ((this.popInfection + this.popMining) > (int)this.machines)
+            {
+                this.popInfection = Math.Max((int)this.machines - this.popMining, 0);
+                if (this.popMining > (int)this.machines)
+                {
+                    this.popMining = Math.Max((int)this.machines, 0);
+                }
+            }
+        }
+
+        this.infectivity = ((float)30f / (float)(turn + 50f)) * this.infectivityMultiplier;
 
         this.changeMoney = ((double)this.popMining * this.moneyMultiplier) - (this.upkeepMultiplier * (int)this.machines);
         this.changeMachines = this.popInfection * this.infectivity;
 
-        this.threat = Mathf.Max(Mathf.Min(1f, ((((float)(machines - 1) * 0.0005f) + ((float)this.changeMachines * 0.002f)) * (1 + (this.turn * 0.002f))) - (this.popDefense * 0.002f)), 0f);
-        this.threat *= this.threatMultiplier;
+        this.threat = Mathf.Max(Mathf.Min(1f, (((((float)(machines - 1) * 0.0005f) + ((float)this.changeMachines * 0.002f)) * (1 + (this.turn * 0.002f))) - (this.popDefense * 0.002f)) * this.threatMultiplier), 0f);
     }
 
-    double GetMoney()
+    void GameOver(string message)
     {
-        return this.money;
+        message = "GAME OVER!\n" + message;
+        this.gameOver = true;
+
+        if (this.scores.IsHighScore(this.maxMoney)) {
+            this.textPopup.text = message;
+            this.panelHighScore.SetActive(true);
+        }
+        else {
+            Popup(message);
+        }
+    }
+
+    void CloseWindow()
+    {
+        if (this.panelPopup.activeSelf)
+        {
+            if (this.gameOver)
+            {
+                SceneManager.LoadScene(0);
+            }
+            else
+            {
+                this.panelPopup.SetActive(false);
+            }
+            return;
+        }
+
+        if (this.panelHighScore.activeSelf)
+        {
+            this.panelHighScore.SetActive(false);
+            string name = this.textUsername.text;
+            if (name.Length <= 1)
+            {
+                name = "Anonymous";
+            }
+            this.scores.AddScore(this.maxMoney, name);
+            this.SaveScores();
+            this.panelPopup.SetActive(true);
+        }
+
+        if (this.panelUpgrades.activeSelf)
+        {
+            this.panelUpgrades.SetActive(false);
+        }
+
+        if (this.panelScores.activeSelf)
+        {
+            this.panelScores.SetActive(false);
+        }
+
+        if (this.panelDebug.activeSelf)
+        {
+            this.panelDebug.SetActive(false);
+        }
+
+        if (this.panelAbout.activeSelf)
+        {
+            this.panelAbout.SetActive(false);
+        }
     }
 
     public void HandleButton(string id)
@@ -343,9 +489,15 @@ public class GameManager : MonoBehaviour
         switch (chars[0])
         {
             case 'd':
+                // defense buttons
+                if (chars.Length < 2)
+                {
+                    Debug.LogWarning("Button had empty secondary id!");
+                    return;
+                }
                 if (chars[1] == '+')
                 {
-                    this.popDefense = Math.Min(this.popDefense + this.popInfection + this.popMining + mod, (int)this.machines - (this.popInfection + this.popMining));
+                    this.popDefense = Math.Min(this.popDefense + mod, (int)this.machines - (this.popInfection + this.popMining));
                 }
                 if (chars[1] == '-')
                 {
@@ -353,9 +505,15 @@ public class GameManager : MonoBehaviour
                 }
                 break;
             case 'i':
+                // infection buttons
+                if (chars.Length < 2)
+                {
+                    Debug.LogWarning("Button had empty secondary id!");
+                    return;
+                }
                 if (chars[1] == '+')
                 {
-                    this.popInfection = Math.Min(this.popDefense + this.popInfection + this.popMining + mod, (int)this.machines - (this.popDefense + this.popMining));
+                    this.popInfection = Math.Min(this.popInfection + mod, (int)this.machines - (this.popDefense + this.popMining));
                 }
                 if (chars[1] == '-')
                 {
@@ -363,29 +521,128 @@ public class GameManager : MonoBehaviour
                 }
                 break;
             case 'm':
+                // mining buttons
+                if (chars.Length < 2)
+                {
+                    Debug.LogWarning("Button had empty secondary id!");
+                    return;
+                }
                 if (chars[1] == '+')
                 {
-                    this.popMining = Math.Min(this.popDefense + this.popInfection + this.popMining + mod, (int)this.machines - (this.popInfection + this.popDefense));
+                    this.popMining = Math.Min(this.popMining + mod, (int)this.machines - (this.popInfection + this.popDefense));
                 }
                 if (chars[1] == '-')
                 {
                     this.popMining = Math.Max(this.popMining - mod, 0);
                 }
                 break;
-            case 'w':
+            case 'o':
+                // open window
                 if (chars.Length < 2)
                 {
                     Debug.LogWarning("Button had empty secondary id!");
                     return;
                 }
-                if (chars[1] == 'o')
+                if (chars[1] == 'u')
                 {
                     this.panelUpgrades.SetActive(true);
                 }
-                if (chars[1] == 'c')
+                if (chars[1] == 's')
                 {
-                    this.panelUpgrades.SetActive(false);
+                    this.panelScores.SetActive(true);
                 }
+                if (chars[1] == 'd')
+                {
+                    this.panelDebug.SetActive(true);
+                }
+                if (chars[1] == 'a')
+                {
+                    this.panelAbout.SetActive(true);
+                }
+                break;
+            case 'c':
+                // close window
+                this.CloseWindow();
+
+                break;
+            case 'z':
+                // debug
+                if (chars.Length < 2)
+                {
+                    Debug.LogWarning("Button had empty secondary id!");
+                    return;
+                }
+
+                if (chars[1] == 'l')
+                {
+                    this.CloseWindow();
+                    GameOver("debug");
+                }
+                if (chars[1] == 'm')
+                {
+                    this.money = Double.PositiveInfinity;
+                }
+                if (chars[1] == 'g')
+                {
+                    this.luck = 1.0f;
+                }
+
+                break;
+            case 'u':
+                // upgrade
+                if (chars.Length < 2)
+                {
+                    Debug.LogWarning("Button had empty secondary id!");
+                    return;
+                }
+                if (chars[1] == '0')
+                {
+                    if (this.money < 777)
+                    {
+                        this.Popup("You cannot afford that!");
+                        return;
+                    }
+                    this.money -= 777;
+                    this.luck += 0.01f;
+                    this.upgradeButtons[0].GetComponent<Button>().interactable = false;
+                }
+                if (chars[1] == '1')
+                {
+                    if (this.money < 100)
+                    {
+                        this.Popup("You cannot afford that!");
+                        return;
+                    }
+                    this.money -= 100;
+                    this.infectivityMultiplier *= 2f;
+                    this.upgradeButtons[1].GetComponent<Button>().interactable = false;
+                }
+                if (chars[1] == '2')
+                {
+                    if (this.money < 666)
+                    {
+                        this.Popup("You cannot afford that!");
+                        return;
+                    }
+                    this.money -= 666;
+                    this.moneyMultiplier *= 2f;
+                    this.upgradeButtons[2].GetComponent<Button>().interactable = false;
+                }
+                if (chars[1] == '3')
+                {
+                    if (this.money < 500)
+                    {
+                        this.Popup("You cannot afford that!");
+                        return;
+                    }
+                    this.money -= 500;
+                    this.threatMultiplier /= 2f;
+                    this.upgradeButtons[3].GetComponent<Button>().interactable = false;
+                }
+                break;
+            case 's':
+                this.scores = new Scores();
+                this.UpdateScores();
                 break;
             default:
                 Debug.LogWarning("Button had unhandled id \"" + id + "\"!");
@@ -393,18 +650,6 @@ public class GameManager : MonoBehaviour
         }
 
         CalculateRates();
-    }
-
-    public void ClosePopup()
-    {
-        if (gameOver)
-        {
-            SceneManager.LoadScene(0);
-        }
-        else
-        {
-            this.panelPopup.SetActive(false);
-        }
     }
 
     public void OnX10(InputAction.CallbackContext context)
@@ -415,6 +660,22 @@ public class GameManager : MonoBehaviour
     public void OnX100(InputAction.CallbackContext context)
     {
         this.x100 = context.ReadValue<float>() == 1.0f;
+    }
+
+    public void OnEscape(InputAction.CallbackContext context)
+    {
+        if (context.ReadValue<float>() == 1.0f)
+        {
+            if (!this.escape)
+            {
+                this.CloseWindow();
+                this.escape = true;
+            }
+        }
+        else
+        {
+            this.escape = false;
+        }
     }
 
     private class Event {
@@ -444,6 +705,53 @@ public class GameManager : MonoBehaviour
         public Event Copy()
         {
             return new Event(this.weight, this.applyAction, this.duration, this.removeAction);
+        }
+    }
+
+    [Serializable]
+    public class Scores
+    {
+        public double[] values = new double[SCORES_LENGTH];
+        public string[] names = new string[SCORES_LENGTH];
+
+        public void AddScore(double value, string name)
+        {
+            for (int i = 0; i < SCORES_LENGTH; i++)
+            {
+                if (value > this.values[i])
+                {
+                    for (int j = SCORES_LENGTH - 1; j > i; j--)
+                    {
+                        this.values[j] = this.values[j - 1];
+                        this.names[j] = this.names[j - 1];
+                    }
+                    this.values[i] = value;
+                    this.names[i] = name;
+                    return;
+                }
+            }
+        }
+
+        public bool IsHighScore(double value)
+        {
+            for (int i = 0; i < SCORES_LENGTH; i++)
+            {
+                if (value > this.values[i])
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        public double GetValue(int index)
+        {
+            return this.values[index];
+        }
+
+        public string GetName(int index)
+        {
+            return this.names[index];
         }
     }
 }
