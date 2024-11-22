@@ -4,9 +4,7 @@ using TMPro;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.InputSystem;
-using System.Runtime.ConstrainedExecution;
 using System.IO;
-using System.Data.SqlTypes;
 using UnityEngine.UI;
 
 public class GameManager : MonoBehaviour
@@ -69,9 +67,12 @@ public class GameManager : MonoBehaviour
     float upkeepMultiplier = 0.01f;
     float luck = 0.03f;
 
-    int popDefense = 0;
-    int popInfection = 0;
-    int popMining = 0;
+    double[] upgradePrices = {7777, 100, 666, 500};
+    int[] upgradeCounts = { 1, 1, 1, 1 };
+
+    double popDefense = 0;
+    double popInfection = 0;
+    double popMining = 0;
 
     bool x10 = false;
     bool x100 = false;
@@ -182,7 +183,7 @@ public class GameManager : MonoBehaviour
                 double lost = Mathf.Min((float)this.money * percentLost, 1000f);
 
                 this.money -= lost;
-                this.Popup(string.Format(CultureInfo.InvariantCulture, "One of your cripto wallets got compromised! You lost ${0:f2}.", lost));
+                this.Popup(string.Format(CultureInfo.InvariantCulture, "One of your cripto wallets got compromised! You lost ${0:g5}.", lost));
             })
         };
 
@@ -249,7 +250,7 @@ public class GameManager : MonoBehaviour
             }
             else
             {
-                this.textScores[i].text = string.Format(CultureInfo.InvariantCulture, "#{0:d} {1} - ${2:f2}", i + 1, name, this.scores.GetValue(i));
+                this.textScores[i].text = string.Format(CultureInfo.InvariantCulture, "#{0:d} {1} - ${2:g5}", i + 1, name, this.scores.GetValue(i));
             }
         }
     }
@@ -368,14 +369,19 @@ public class GameManager : MonoBehaviour
     {
         this.textTurn.text = string.Format(CultureInfo.InvariantCulture, "Turn: {0:d}", this.turn);
 
-        this.textStatMoney.text = string.Format(CultureInfo.InvariantCulture, "Money: ${0:f2} (+{1:f2})", this.money, this.changeMoney);
-        this.textStatMachines.text = string.Format(CultureInfo.InvariantCulture, "Machines: {0:f0} (+{1:f1})", Math.Floor(this.machines), this.changeMachines);
+        this.textStatMoney.text = string.Format(CultureInfo.InvariantCulture, "Money: ${0:g5} (+{1:g5})", this.money, this.changeMoney);
+        this.textStatMachines.text = string.Format(CultureInfo.InvariantCulture, "Machines: {0:g5} (+{1:g5})", Math.Floor(this.machines), this.changeMachines);
         this.textStatThreat.text = string.Format(CultureInfo.InvariantCulture, "Threat: {0:f1}%", this.threat * 100);
-        this.textStatInfectivity.text = string.Format(CultureInfo.InvariantCulture, "Infectivity: {0:f2}", this.infectivity);
+        this.textStatInfectivity.text = string.Format(CultureInfo.InvariantCulture, "Infectivity: {0:g5}", this.infectivity);
 
-        this.textPopDefense.text = string.Format(CultureInfo.InvariantCulture, "Defense {0:d}/{1:f0}", this.popDefense, Math.Floor(this.machines));
-        this.textPopInfection.text = string.Format(CultureInfo.InvariantCulture, "Infection {0:d}/{1:f0}", this.popInfection, Math.Floor(this.machines));
-        this.textPopMining.text = string.Format(CultureInfo.InvariantCulture, "Mining {0:d}/{1:f0}", this.popMining, Math.Floor(this.machines));
+        this.textPopDefense.text = string.Format(CultureInfo.InvariantCulture, "Defense {0:g5}/{1:g5}", this.popDefense, Math.Floor(this.machines));
+        this.textPopInfection.text = string.Format(CultureInfo.InvariantCulture, "Infection {0:g5}/{1:g5}", this.popInfection, Math.Floor(this.machines));
+        this.textPopMining.text = string.Format(CultureInfo.InvariantCulture, "Mining {0:g5}/{1:g5}", this.popMining, Math.Floor(this.machines));
+
+        this.upgradeButtons[0].GetComponentInChildren<TextMeshProUGUI>().text = string.Format("Lucky {0:d} - ${1:g5}\n1% more lucky", this.upgradeCounts[0], this.upgradePrices[0]);
+        this.upgradeButtons[1].GetComponentInChildren<TextMeshProUGUI>().text = string.Format("Zero Day Hunt {0:d} - ${1:g5}\n200% infection rate", this.upgradeCounts[1], this.upgradePrices[1]);
+        this.upgradeButtons[2].GetComponentInChildren<TextMeshProUGUI>().text = string.Format("Market Stalker {0:d} - ${1:g5}\n200% crypto profits", this.upgradeCounts[2], this.upgradePrices[2]);
+        this.upgradeButtons[3].GetComponentInChildren<TextMeshProUGUI>().text = string.Format("Stealthy {0:d} - ${1:g5}\n50% as detectable", this.upgradeCounts[3], this.upgradePrices[3]);
     }
 
     void CalculateRates()
@@ -399,7 +405,7 @@ public class GameManager : MonoBehaviour
         this.changeMoney = ((double)this.popMining * this.moneyMultiplier) - (this.upkeepMultiplier * (int)this.machines);
         this.changeMachines = this.popInfection * this.infectivity;
 
-        this.threat = Mathf.Max(Mathf.Min(1f, (((((float)(machines - 1) * 0.0005f) + ((float)this.changeMachines * 0.002f)) * (1 + (this.turn * 0.002f))) - (this.popDefense * 0.002f)) * this.threatMultiplier), 0f);
+        this.threat = Mathf.Max(Mathf.Min(1f, (float)(((((machines - 1) * 0.0005f) + (this.changeMachines * 0.002f)) * (1 + (this.turn * 0.002f))) - (this.popDefense * 0.002f)) * this.threatMultiplier), 0f);
     }
 
     void GameOver(string message)
@@ -497,7 +503,7 @@ public class GameManager : MonoBehaviour
                 }
                 if (chars[1] == '+')
                 {
-                    this.popDefense = Math.Min(this.popDefense + mod, (int)this.machines - (this.popInfection + this.popMining));
+                    this.popDefense = Math.Min(this.popDefense + mod, Math.Floor(this.machines) - (this.popInfection + this.popMining));
                 }
                 if (chars[1] == '-')
                 {
@@ -513,7 +519,7 @@ public class GameManager : MonoBehaviour
                 }
                 if (chars[1] == '+')
                 {
-                    this.popInfection = Math.Min(this.popInfection + mod, (int)this.machines - (this.popDefense + this.popMining));
+                    this.popInfection = Math.Min(this.popInfection + mod, Math.Floor(this.machines) - (this.popDefense + this.popMining));
                 }
                 if (chars[1] == '-')
                 {
@@ -529,7 +535,7 @@ public class GameManager : MonoBehaviour
                 }
                 if (chars[1] == '+')
                 {
-                    this.popMining = Math.Min(this.popMining + mod, (int)this.machines - (this.popInfection + this.popDefense));
+                    this.popMining = Math.Min(this.popMining + mod, Math.Floor(this.machines) - (this.popInfection + this.popDefense));
                 }
                 if (chars[1] == '-')
                 {
@@ -597,47 +603,51 @@ public class GameManager : MonoBehaviour
                 }
                 if (chars[1] == '0')
                 {
-                    if (this.money < 777)
+                    if (this.money < this.upgradePrices[0])
                     {
                         this.Popup("You cannot afford that!");
                         return;
                     }
-                    this.money -= 777;
+                    this.money -= this.upgradePrices[0];
                     this.luck += 0.01f;
-                    this.upgradeButtons[0].GetComponent<Button>().interactable = false;
+                    this.upgradePrices[0] = this.upgradePrices[0] * 1000 + 777;
+                    this.upgradeCounts[0]++;
                 }
                 if (chars[1] == '1')
                 {
-                    if (this.money < 100)
+                    if (this.money < this.upgradePrices[1])
                     {
                         this.Popup("You cannot afford that!");
                         return;
                     }
-                    this.money -= 100;
+                    this.money -= this.upgradePrices[1];
                     this.infectivityMultiplier *= 2f;
-                    this.upgradeButtons[1].GetComponent<Button>().interactable = false;
+                    this.upgradePrices[1] = this.upgradePrices[1] * 100;
+                    this.upgradeCounts[1]++;
                 }
                 if (chars[1] == '2')
                 {
-                    if (this.money < 666)
+                    if (this.money < this.upgradePrices[2])
                     {
                         this.Popup("You cannot afford that!");
                         return;
                     }
-                    this.money -= 666;
+                    this.money -= this.upgradePrices[2];
                     this.moneyMultiplier *= 2f;
-                    this.upgradeButtons[2].GetComponent<Button>().interactable = false;
+                    this.upgradePrices[2] = this.upgradePrices[2] * 1000 + 666;
+                    this.upgradeCounts[2]++;
                 }
                 if (chars[1] == '3')
                 {
-                    if (this.money < 500)
+                    if (this.money < this.upgradePrices[3])
                     {
                         this.Popup("You cannot afford that!");
                         return;
                     }
-                    this.money -= 500;
+                    this.money -= this.upgradePrices[3];
                     this.threatMultiplier /= 2f;
-                    this.upgradeButtons[3].GetComponent<Button>().interactable = false;
+                    this.upgradePrices[3] = this.upgradePrices[3] * 100;
+                    this.upgradeCounts[3]++;
                 }
                 break;
             case 's':
